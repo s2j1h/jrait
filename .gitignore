@@ -1,0 +1,16 @@
+.env
+*.pem
+instance/
+logs/*
+!logs/.gitkeep
+cineroulette/static/covers/*
+!cineroulette/static/covers/.gitkeep
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+
+*.csv
+csv
