@@ -7,10 +7,11 @@ Outils pour vérifier la cohérence entre les dates EXIF des photos JPEG et le n
 Ce dépôt part d'une convention de rangement des photos par dossiers datés :
 
 ```
-AAAA-MM-JJ_libelle   (ex. 2026-08-09_vacances)
+AAAA-MM-JJ_libelle   (ex. 2026-08-09_vacances)  -> photos prises ce jour-là
+AAAA-MM_libelle      (ex. 2026-08_vacances)     -> photos prises ce mois-là
 ```
 
-Le but est de détecter les photos mal classées, c'est-à-dire dont la date de prise de vue (EXIF) ne correspond pas à la date indiquée par le dossier parent.
+Le but est de détecter les photos mal classées, c'est-à-dire dont la date de prise de vue (EXIF) ne correspond pas à la date indiquée par le dossier parent. Quand le dossier ne précise que l'année et le mois, seule la correspondance année-mois est vérifiée (le jour n'est pas contraint).
 
 Le dépôt contient deux outils indépendants :
 
@@ -51,8 +52,11 @@ Pour chaque fichier `.jpg` / `.jpeg` rencontré lors du parcours :
    - `DateTimeOriginal` (date de prise de vue)
    - `DateTimeDigitized` (date de numérisation)
    - `DateTime` (date de dernière modification)
-2. Extraction de la date `AAAA-MM-JJ` en tête du nom du dossier parent (regex `^(\d{4})-(\d{2})-(\d{2})(?:[_\-\s].*)?$`, avec contrôle sommaire que le mois et le jour sont dans une plage valide).
-3. Comparaison entre la date de prise de vue et la date du dossier pour déterminer un statut de cohérence.
+2. Extraction de la date en tête du nom du dossier parent :
+   - d'abord au format `AAAA-MM-JJ` (regex `^(\d{4})-(\d{2})-(\d{2})(?:[_\-\s].*)?$`) → comparaison au jour près ;
+   - à défaut, au format `AAAA-MM` (regex `^(\d{4})-(\d{2})(?:[_\-\s].*)?$`) → comparaison au mois près uniquement.
+   Dans les deux cas, un contrôle sommaire vérifie que le mois (et le jour, le cas échéant) sont dans une plage valide.
+3. Comparaison entre la date de prise de vue et la date du dossier (jour exact ou année-mois selon le format détecté) pour déterminer un statut de cohérence.
 
 ### Colonnes du CSV produit
 
@@ -71,11 +75,15 @@ Séparateur `;`, encodage `utf-8-sig` (BOM pour un affichage correct des accents
 
 | Valeur | Signification |
 |---|---|
-| `COHERENT` | La date de prise de vue correspond à la date du dossier |
+| `COHERENT` | La date de prise de vue correspond à la date du dossier (jour exact, ou année-mois si le dossier ne précise pas le jour) |
 | `INCOHERENT` | La date de prise de vue diffère de la date du dossier |
-| `DOSSIER_SANS_DATE` | Le nom du dossier ne commence pas par une date `AAAA-MM-JJ` valide |
+| `DOSSIER_SANS_DATE` | Le nom du dossier ne commence pas par une date `AAAA-MM-JJ` ou `AAAA-MM` valide |
 | `EXIF_SANS_DATE` | Le dossier a une date, mais `DateTimeOriginal` est absent/illisible dans l'EXIF |
 | `ERREUR_LECTURE` | Le fichier n'a pas pu être ouvert (image corrompue, format invalide, etc.) |
+
+### Progression
+
+Pendant le traitement, une ligne est mise à jour en place (sans défiler) indiquant le nombre de photos traitées et le dossier en cours d'analyse, rafraîchie au maximum 5 fois par seconde pour ne pas ralentir le script sur de gros volumes.
 
 ### Récapitulatif console
 

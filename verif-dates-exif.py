@@ -9,7 +9,10 @@ si la date de prise de vue est cohérente avec le nom du dossier parent.
 
 Convention de nommage attendue pour les dossiers :
     AAAA-MM-JJ_libelle   (ex. 2026-08-09_vacances)
+    AAAA-MM_libelle      (ex. 2026-08_vacances)
 Le dossier « 2026-08-09_... » est censé contenir des photos prises ce jour-là.
+Le dossier « 2026-08_... » (sans jour) est censé contenir des photos prises
+ce mois-là ; seule la correspondance année-mois est alors vérifiée.
 
 Colonnes du CSV produit :
     1. repertoire        : chemin du dossier parent de la photo
@@ -34,6 +37,7 @@ import csv
 import os
 import re
 import sys
+import time
 
 try:
     from PIL import Image
@@ -50,7 +54,10 @@ TAG_DATETIME_DIGITIZED = 0x9004  # 36868 -> DateTimeDigitized   (numérisation)
 EXTENSIONS = (".jpg", ".jpeg")
 
 # Date en tête de nom de dossier : AAAA-MM-JJ suivi de rien, d'un _, - ou espace
-RE_DATE_DOSSIER = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?:[_\-\s].*)?$")
+RE_DATE_DOSSIER_JOUR = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?:[_\-\s].*)?$")
+
+# Ou, à défaut, juste AAAA-MM (pas de jour précisé) suivi de rien, _, - ou espace
+RE_DATE_DOSSIER_MOIS = re.compile(r"^(\d{4})-(\d{2})(?:[_\-\s].*)?$")
 
 # Format d'une date EXIF brute : "AAAA:MM:JJ HH:MM:SS"
 RE_DATE_EXIF = re.compile(r"^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})")
@@ -105,27 +112,56 @@ def lire_dates_exif(chemin):
 
 
 def date_du_dossier(nom_dossier):
-    """Extrait 'AAAA-MM-JJ' d'un nom de dossier comme '2026-08-09_libelle'.
-    Renvoie None si le nom ne commence pas par une date valide."""
-    m = RE_DATE_DOSSIER.match(nom_dossier)
-    if not m:
+    """Extrait la date attendue d'un nom de dossier.
+    Accepte 'AAAA-MM-JJ_libelle' (précision jour) ou, à défaut,
+    'AAAA-MM_libelle' (précision mois).
+    Renvoie un tuple (valeur, precision) où precision vaut 'jour' ou 'mois',
+    ou None si le nom ne commence pas par une date valide."""
+    m = RE_DATE_DOSSIER_JOUR.match(nom_dossier)
+    if m:
+        annee, mois, jour = m.groups()
+        if 1 <= int(mois) <= 12 and 1 <= int(jour) <= 31:
+            return f"{annee}-{mois}-{jour}", "jour"
         return None
-    annee, mois, jour = m.groups()
-    # contrôle sommaire de validité
-    if not (1 <= int(mois) <= 12 and 1 <= int(jour) <= 31):
+
+    m = RE_DATE_DOSSIER_MOIS.match(nom_dossier)
+    if m:
+        annee, mois = m.groups()
+        if 1 <= int(mois) <= 12:
+            return f"{annee}-{mois}", "mois"
         return None
-    return f"{annee}-{mois}-{jour}"
+
+    return None
 
 
-def evaluer_coherence(jour_creation, jour_dossier, erreur):
-    """Détermine la valeur de la colonne 'coherence'."""
+def evaluer_coherence(jour_creation, date_dossier, erreur):
+    """Détermine la valeur de la colonne 'coherence'.
+    'date_dossier' est le tuple (valeur, precision) renvoyé par
+    date_du_dossier(), ou None."""
     if erreur:
         return "ERREUR_LECTURE"
-    if jour_dossier is None:
+    if date_dossier is None:
         return "DOSSIER_SANS_DATE"
     if jour_creation is None:
         return "EXIF_SANS_DATE"
-    return "COHERENT" if jour_creation == jour_dossier else "INCOHERENT"
+
+    valeur, precision = date_dossier
+    if precision == "jour":
+        return "COHERENT" if jour_creation == valeur else "INCOHERENT"
+    # precision == "mois" : on ne compare que l'année et le mois
+    return "COHERENT" if jour_creation[:7] == valeur else "INCOHERENT"
+
+
+def afficher_progression(total, dossier_courant, termine=False):
+    """Affiche une ligne de progression mise à jour en place (sans retour
+    à la ligne), avec le nombre de photos traitées et le dossier en cours."""
+    if termine:
+        print(f"\r{' ' * 100}\r", end="")
+        return
+    ligne = f"\r{total} photo(s) traitée(s)... {dossier_courant}"
+    largeur_terminal = os.get_terminal_size().columns if sys.stdout.isatty() else 200
+    ligne = ligne[:largeur_terminal - 1]
+    print(f"{ligne}{' ' * (largeur_terminal - 1 - len(ligne))}", end="", flush=True)
 
 
 def main():
@@ -155,8 +191,9 @@ def main():
             "coherence",
         ])
 
+        dernier_affichage = 0.0
         for dossier, _sous_dossiers, fichiers in os.walk(racine):
-            jour_dossier = date_du_dossier(os.path.basename(dossier))
+            date_dossier = date_du_dossier(os.path.basename(dossier))
             for nom in sorted(fichiers):
                 if not nom.lower().endswith(EXTENSIONS):
                     continue
@@ -164,7 +201,7 @@ def main():
                 (creation_str, jour_creation, numerisation_str,
                  modification_str, erreur) = lire_dates_exif(chemin)
 
-                coherence = evaluer_coherence(jour_creation, jour_dossier, erreur)
+                coherence = evaluer_coherence(jour_creation, date_dossier, erreur)
 
                 writer.writerow([
                     dossier, nom,
@@ -174,6 +211,15 @@ def main():
 
                 compteur["total"] += 1
                 compteur[coherence] = compteur.get(coherence, 0) + 1
+
+                # Indicateur de progression, rafraîchi au maximum 5x/seconde
+                # pour ne pas ralentir le traitement sur de gros volumes.
+                maintenant = time.monotonic()
+                if maintenant - dernier_affichage >= 0.2:
+                    afficher_progression(compteur["total"], dossier)
+                    dernier_affichage = maintenant
+
+        afficher_progression(compteur["total"], "", termine=True)
 
     # --- Récapitulatif à l'écran -----------------------------------------
     print(f"{compteur['total']} photo(s) traitée(s).")
