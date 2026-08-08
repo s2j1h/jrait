@@ -14,3 +14,7 @@ venv/
 
 *.csv
 csv
+
+*.xlsx
+xlsx
+

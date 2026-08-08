@@ -18,8 +18,19 @@ Le dépôt contient deux outils indépendants :
 | Fichier | Rôle |
 |---|---|
 | [verif-dates-exif.py](verif-dates-exif.py) | Parcourt un répertoire, compare les dates EXIF au nom du dossier, produit un rapport CSV avec un statut de cohérence par photo. |
+| [ajoute-dates-exif.py](ajoute-dates-exif.py) | Force les trois dates EXIF de toutes les photos d'un répertoire à une même date donnée en paramètre (écrase les dates existantes ou les crée). |
 | [verif-dates-exif.sh](verif-dates-exif.sh) | Affiche rapidement les trois dates EXIF de chaque photo d'un répertoire, sans analyse de cohérence (basé sur `exiftool`). |
 | [dates_exif.csv](dates_exif.csv) | Exemple de rapport généré par le script Python. |
+
+## Installation
+
+Les scripts Python nécessitent Python 3 et les dépendances listées dans [requirements.txt](requirements.txt) (`pillow` pour `verif-dates-exif.py`, `piexif` pour `ajoute-dates-exif.py`). Dans un environnement virtuel :
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
 ## verif-dates-exif.py
 
@@ -88,6 +99,52 @@ Pendant le traitement, une ligne est mise à jour en place (sans défiler) indiq
 ### Récapitulatif console
 
 À la fin de l'exécution, le script affiche le nombre total de photos traitées et la répartition par statut de cohérence.
+
+## ajoute-dates-exif.py
+
+Force les trois dates EXIF (prise de vue, numérisation, modification) de toutes les photos JPG/JPEG d'un répertoire à une seule et même date, donnée en paramètre. Utile pour dater un lot de photos qui n'en ont pas (scans, exports sans métadonnées) ou pour corriger un lot mal daté.
+
+- Si le fichier a déjà des dates EXIF, elles sont **écrasées**.
+- S'il n'en a aucune, elles sont **créées**.
+- Les autres métadonnées EXIF (appareil photo, GPS, etc.) sont conservées telles quelles.
+- Seul le bloc de métadonnées est réécrit : l'image n'est **pas réencodée**, ses pixels restent identiques (pas de perte de qualité JPEG).
+
+### Dépendances
+
+- Python 3
+- [piexif](https://github.com/hMatoba/Piexif) : `pip install piexif`
+
+### Usage
+
+```bash
+python3 ajoute-dates-exif.py <repertoire> <date> [--dry-run]
+```
+
+- `repertoire` : dossier à traiter (parcouru récursivement).
+- `date` : date à appliquer, au format `AAAA-MM-JJ` ou `"AAAA-MM-JJ HH:MM:SS"` (heure omise → `00:00:00`).
+- `--dry-run` : n'écrit rien, affiche seulement les fichiers qui seraient modifiés.
+
+Exemples :
+
+```bash
+python3 ajoute-dates-exif.py "/Volumes/homes/2026-08-09_vacances" 2026-08-09
+python3 ajoute-dates-exif.py "/Volumes/homes/2026-08-09_vacances" "2026-08-09 14:30:00"
+python3 ajoute-dates-exif.py "/Volumes/homes/2026-08-09_vacances" 2026-08-09 --dry-run
+```
+
+### Tags EXIF renseignés
+
+| Tag | IFD | Rôle |
+|---|---|---|
+| `DateTime` (0x0132) | IFD0 | Date de modification |
+| `DateTimeOriginal` (0x9003) | Exif | Date de prise de vue |
+| `DateTimeDigitized` (0x9004) | Exif | Date de numérisation |
+
+Les trois sont réglés à la même valeur, celle passée en paramètre.
+
+### Progression et résumé
+
+Comme `verif-dates-exif.py`, une ligne de progression est affichée pendant le traitement (mise à jour en place, rafraîchie au maximum 5x/seconde), suivie d'un résumé indiquant le nombre de photos traitées et, le cas échéant, la liste des fichiers en erreur.
 
 ## verif-dates-exif.sh
 
